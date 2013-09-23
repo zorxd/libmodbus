@@ -1128,7 +1128,7 @@ const modbus_backend_t _modbus_rtu_backend = {
 };
 
 modbus_t* modbus_new_rtu(const char *device,
-                         int baud, char parity, int data_bit,
+                         uint32_t baud, char parity, int data_bit,
                          int stop_bit)
 {
     modbus_t *ctx;

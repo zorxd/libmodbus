@@ -61,14 +61,14 @@ struct win32_ser {
 typedef struct _modbus_rtu {
     /* Device: "/dev/ttyS0", "/dev/ttyUSB0" or "/dev/tty.USA19*" on Mac OS X. */
     char *device;
-    /* Bauds: 9600, 19200, 57600, 115200, etc */
-    int baud;
     /* Data bit */
     uint8_t data_bit;
     /* Stop bit */
     uint8_t stop_bit;
     /* Parity: 'N', 'O', 'E' */
     char parity;
+    /* Bauds: 9600, 19200, 57600, 115200, etc */
+    uint32_t baud;
 #if defined(_WIN32)
     struct win32_ser w_ser;
     DCB old_dcb;
