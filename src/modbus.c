@@ -161,6 +161,7 @@ static unsigned int compute_response_length_from_request(modbus_t *ctx, uint8_t 
         length = 3;
         break;
     case MODBUS_FC_REPORT_SLAVE_ID:
+    case MODBUS_FC_EIT:
         /* The response is device specific (the header provides the
            length) */
         return MSG_LENGTH_UNDEFINED;
@@ -274,6 +275,8 @@ static uint8_t compute_meta_length_after_function(int function,
             length = 6;
         } else if (function == MODBUS_FC_WRITE_AND_READ_REGISTERS) {
             length = 9;
+        } else if (function == MODBUS_FC_EIT) {
+            length = 3;
         } else {
             /* MODBUS_FC_READ_EXCEPTION_STATUS, MODBUS_FC_REPORT_SLAVE_ID */
             length = 0;
@@ -289,6 +292,9 @@ static uint8_t compute_meta_length_after_function(int function,
             break;
         case MODBUS_FC_MASK_WRITE_REGISTER:
             length = 6;
+            break;
+        case MODBUS_FC_EIT:
+            length = 8;
             break;
         default:
             length = 1;
@@ -323,6 +329,8 @@ static int compute_data_length_after_meta(modbus_t *ctx, uint8_t *msg,
             function == MODBUS_FC_REPORT_SLAVE_ID ||
             function == MODBUS_FC_WRITE_AND_READ_REGISTERS) {
             length = msg[ctx->backend->header_length + 1];
+        } else if (function == MODBUS_FC_EIT) {
+            length = msg[ctx->backend->header_length + 8];
         } else {
             length = 0;
         }
@@ -601,6 +609,9 @@ static int check_confirmation(modbus_t *ctx, uint8_t *req,
         case MODBUS_FC_REPORT_SLAVE_ID:
             /* Report slave ID (bytes received) */
             req_nb_value = rsp_nb_value = rsp[offset + 1];
+            break;
+        case MODBUS_FC_EIT:
+            req_nb_value = rsp_nb_value = rsp[offset + 8];
             break;
         default:
             /* 1 Write functions & others */
@@ -1575,6 +1586,51 @@ int modbus_report_slave_id(modbus_t *ctx, int max_dest, uint8_t *dest)
 
         /* Byte count, slave id, run indicator status and
            additional data. Truncate copy to max_dest. */
+        for (i=0; i < rc && i < max_dest; i++) {
+            dest[i] = rsp[offset + i];
+        }
+    }
+
+    return rc;
+}
+
+int modbus_read_device_id(modbus_t *ctx, int obj_id, int max_dest, char *dest)
+{
+    int rc;
+    int req_length;
+    uint8_t req[_MIN_REQ_LENGTH];
+
+    if (ctx == NULL || max_dest <= 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    req_length = ctx->backend->build_request_basis(ctx, MODBUS_FC_EIT,
+                                                   0, 0, req);
+
+    /* HACKISH, addr and count are not used */
+    req_length -= 4;
+
+    req[req_length++] = MODBUS_MEI_READ_DEVICE_ID;
+    req[req_length++] = 4;
+    req[req_length++] = obj_id;
+
+    rc = send_msg(ctx, req, req_length);
+    if (rc > 0) {
+        int i;
+        int offset;
+        uint8_t rsp[MAX_MESSAGE_LENGTH];
+
+        rc = receive_msg(ctx, rsp, MSG_CONFIRMATION);
+        if (rc == -1)
+            return -1;
+
+        rc = check_confirmation(ctx, req, rsp, rc);
+        if (rc == -1)
+            return -1;
+
+        offset = ctx->backend->header_length + 9;
+
         for (i=0; i < rc && i < max_dest; i++) {
             dest[i] = rsp[offset + i];
         }
