@@ -331,6 +331,11 @@ static int compute_data_length_after_meta(modbus_t *ctx, uint8_t *msg,
             length = msg[ctx->backend->header_length + 1];
         } else if (function == MODBUS_FC_EIT) {
             length = msg[ctx->backend->header_length + 8];
+
+            /* Include the ID and length of the following object */
+            if(msg[ctx->backend->header_length + 6] > 1) {
+                length += 2;
+            }
         } else {
             length = 0;
         }
@@ -364,6 +369,8 @@ int _modbus_receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
     int length_to_read;
     int msg_length = 0;
     _step_t step;
+    int function = 0;
+    int stream_objects = 0;
 
     if (ctx->debug) {
         if (msg_type == MSG_INDICATION) {
@@ -448,6 +455,7 @@ int _modbus_receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
             switch (step) {
             case _STEP_FUNCTION:
                 /* Function code position */
+                function = msg[ctx->backend->header_length];
                 length_to_read = compute_meta_length_after_function(
                     msg[ctx->backend->header_length],
                     msg_type);
@@ -463,7 +471,16 @@ int _modbus_receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
                     _error_print(ctx, "too many data");
                     return -1;
                 }
+                if (function == MODBUS_FC_EIT) {
+                    stream_objects = msg[ctx->backend->header_length + 6];
+                }
                 step = _STEP_DATA;
+                break;
+            case _STEP_DATA:
+                if (function == MODBUS_FC_EIT && stream_objects > 1) {
+                    length_to_read = msg[msg_length - 1] + 2;
+                    stream_objects--;
+                }
                 break;
             default:
                 break;
@@ -1594,13 +1611,15 @@ int modbus_report_slave_id(modbus_t *ctx, int max_dest, uint8_t *dest)
     return rc;
 }
 
-int modbus_read_device_id(modbus_t *ctx, int obj_id, int max_dest, char *dest)
+int modbus_read_device_id(modbus_t *ctx, modbus_read_device_id_code id_code,
+                          int obj_id, modbus_device_id_response *dest)
 {
     int rc;
     int req_length;
     uint8_t req[_MIN_REQ_LENGTH];
 
-    if (ctx == NULL || max_dest <= 0) {
+    if (ctx == NULL || (id_code < MODBUS_READ_DEVICE_ID_BASIC ||
+                        id_code > MODBUS_READ_DEVICE_ID_SPECIFIC)) {
         errno = EINVAL;
         return -1;
     }
@@ -1612,16 +1631,17 @@ int modbus_read_device_id(modbus_t *ctx, int obj_id, int max_dest, char *dest)
     req_length -= 4;
 
     req[req_length++] = MODBUS_MEI_READ_DEVICE_ID;
-    req[req_length++] = 4;
+    req[req_length++] = id_code;
     req[req_length++] = obj_id;
 
     rc = send_msg(ctx, req, req_length);
     if (rc > 0) {
         int i;
         int offset;
+        int data_offset;
         uint8_t rsp[MAX_MESSAGE_LENGTH];
 
-        rc = receive_msg(ctx, rsp, MSG_CONFIRMATION);
+        rc = _modbus_receive_msg(ctx, rsp, MSG_CONFIRMATION);
         if (rc == -1)
             return -1;
 
@@ -1629,10 +1649,28 @@ int modbus_read_device_id(modbus_t *ctx, int obj_id, int max_dest, char *dest)
         if (rc == -1)
             return -1;
 
-        offset = ctx->backend->header_length + 9;
+        offset = ctx->backend->header_length + 3;
 
-        for (i=0; i < rc && i < max_dest; i++) {
-            dest[i] = rsp[offset + i];
+        dest->conformity_level = rsp[offset++];
+        dest->more_follows = rsp[offset++];
+        dest->next_object_id = rsp[offset++];
+        dest->object_count = rsp[offset++];
+
+        data_offset = 0;
+        for (i=0; i < dest->object_count; i++) {
+            uint8_t object_length;
+
+            /* Object ID */
+            dest->objects[data_offset++] = rsp[offset++];
+
+            /* Object length */
+            object_length = rsp[offset++];
+            dest->objects[data_offset++] = object_length;
+
+            /* Object value */
+            for(; object_length > 0; object_length--) {
+                dest->objects[data_offset++] = rsp[offset++];
+            }
         }
     }
 

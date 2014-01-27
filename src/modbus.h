@@ -175,12 +175,28 @@ typedef struct {
     uint16_t *tab_registers;
 } modbus_mapping_t;
 
+typedef struct {
+    uint8_t conformity_level;
+    uint8_t more_follows;
+    uint8_t next_object_id;
+    uint8_t object_count;
+    uint8_t objects[MODBUS_MAX_PDU_LENGTH - 7];
+} modbus_device_id_response;
+
 typedef enum
 {
     MODBUS_ERROR_RECOVERY_NONE          = 0,
     MODBUS_ERROR_RECOVERY_LINK          = (1<<1),
     MODBUS_ERROR_RECOVERY_PROTOCOL      = (1<<2)
 } modbus_error_recovery_mode;
+
+typedef enum
+{
+    MODBUS_READ_DEVICE_ID_BASIC    = 0x01,
+    MODBUS_READ_DEVICE_ID_REGULAR  = 0x02,
+    MODBUS_READ_DEVICE_ID_EXTENDED = 0x03,
+    MODBUS_READ_DEVICE_ID_SPECIFIC = 0x04
+} modbus_read_device_id_code;
 
 MODBUS_API int modbus_set_slave(modbus_t* ctx, int slave);
 MODBUS_API int modbus_set_error_recovery(modbus_t *ctx, modbus_error_recovery_mode error_recovery);
@@ -218,7 +234,8 @@ MODBUS_API int modbus_write_and_read_registers(modbus_t *ctx, int write_addr, in
                                                const uint16_t *src, int read_addr, int read_nb,
                                                uint16_t *dest);
 MODBUS_API int modbus_report_slave_id(modbus_t *ctx, int max_dest, uint8_t *dest);
-MODBUS_API int modbus_read_device_id(modbus_t *ctx, int obj_id, int max_dest, char *dest);
+MODBUS_API int modbus_read_device_id(modbus_t *ctx, modbus_read_device_id_code id_code,
+                                     int obj_id, modbus_device_id_response *dest);
 
 MODBUS_API modbus_mapping_t* modbus_mapping_new(int nb_bits, int nb_input_bits,
                                             int nb_registers, int nb_input_registers);
